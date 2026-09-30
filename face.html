@@ -41,12 +41,6 @@
       src="./hat.glb">
     </a-asset-item>
 
-    <!-- Head Occluder -->
-    <a-asset-item
-      id="headModel"
-      src="https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/face-tracking/assets/sparkar/headOccluder.glb">
-    </a-asset-item>
-
   </a-assets>
 
 
@@ -57,21 +51,6 @@
   </a-camera>
 
 
-  <!-- บังหน้า -->
-  <a-entity
-    mindar-face-target="anchorIndex: 168">
-
-    <a-gltf-model
-      mindar-face-occluder
-      position="0 -0.3 0.15"
-      rotation="0 0 0"
-      scale="0.065 0.065 0.065"
-      src="#headModel">
-    </a-gltf-model>
-
-  </a-entity>
-
-
   <!-- ========================= -->
   <!-- แว่น -->
   <!-- ========================= -->
@@ -80,10 +59,10 @@
     mindar-face-target="anchorIndex: 168">
 
     <a-gltf-model
+      src="#glassesModel"
       rotation="0 0 0"
-      position="0 0 -0.05"
-      scale="10 10 10"
-      src="#glassesModel">
+      position="0 0 0"
+      scale="0.5 0.5 0.5">
     </a-gltf-model>
 
   </a-entity>
@@ -97,10 +76,10 @@
     mindar-face-target="anchorIndex: 10">
 
     <a-gltf-model
+      src="#hatModel"
       rotation="0 0 0"
       position="0 0.2 -0.3"
-      scale="0.35 0.35 0.35"
-      src="#hatModel">
+      scale="0.35 0.35 0.35">
     </a-gltf-model>
 
   </a-entity>
