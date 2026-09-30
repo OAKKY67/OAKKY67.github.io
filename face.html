@@ -1,11 +1,17 @@
 <!DOCTYPE html>
 <html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
 
+<head>
+
+  <meta name="viewport"
+        content="width=device-width, initial-scale=1" />
+
+  <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
 
+  <!-- MindAR Face Tracking -->
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
+
 </head>
 
 <body>
@@ -18,23 +24,73 @@
   vr-mode-ui="enabled: false"
   device-orientation-permission-ui="enabled: false">
 
+
+  <!-- ===================== -->
+  <!-- โหลดแว่น 3D -->
+  <!-- ===================== -->
+
+  <a-assets>
+
+    <a-asset-item
+      id="glassesModel"
+      src="https://cdn.jsdelivr.net/gh/hiukim/mind-ar-js@1.2.5/examples/face-tracking/assets/glasses/scene.gltf">
+    </a-asset-item>
+
+  </a-assets>
+
+
+  <!-- กล้อง -->
   <a-camera
     active="false"
     position="0 0 0">
   </a-camera>
 
-  <!-- จุดที่ติดตามใบหน้า -->
-  <a-entity mindar-face-target="anchorIndex: 1">
 
-    <!-- ลูกบอลติดจมูก -->
-    <a-sphere
-      color="red"
-      radius="0.1">
-    </a-sphere>
+  <!-- ===================== -->
+  <!-- แว่น -->
+  <!-- ===================== -->
+
+  <a-entity
+    mindar-face-target="anchorIndex: 168">
+
+    <a-gltf-model
+      src="#glassesModel"
+      position="0 0 0"
+      rotation="0 0 0"
+      scale="0.01 0.01 0.01">
+    </a-gltf-model>
 
   </a-entity>
+
+
+  <!-- ===================== -->
+  <!-- หมวก -->
+  <!-- ===================== -->
+
+  <a-entity
+    mindar-face-target="anchorIndex: 10">
+
+    <!-- ส่วนบนหมวก -->
+    <a-cylinder
+      color="#222222"
+      radius="0.35"
+      height="0.25"
+      position="0 0.35 0">
+    </a-cylinder>
+
+    <!-- ปีกหมวก -->
+    <a-cylinder
+      color="#111111"
+      radius="0.55"
+      height="0.05"
+      position="0 0.20 0">
+    </a-cylinder>
+
+  </a-entity>
+
 
 </a-scene>
 
 </body>
+
 </html>
