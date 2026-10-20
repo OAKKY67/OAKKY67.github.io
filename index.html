@@ -10,17 +10,57 @@
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
-    body { margin: 0; font-family: sans-serif; }
-    #status {
-      position: fixed; top: 12px; left: 12px; right: 12px;
-      z-index: 20; padding: 14px; border-radius: 10px;
-      background: #10243ddd; color: white; text-align: center;
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
     }
+
+    #status {
+      position: fixed;
+      z-index: 20;
+      top: 12px;
+      left: 12px;
+      right: 12px;
+      padding: 14px;
+      border-radius: 10px;
+      color: white;
+      background: rgba(15, 35, 60, 0.92);
+      text-align: center;
+      line-height: 1.5;
+    }
+
     #start {
-      position: fixed; z-index: 30; top: 50%; left: 50%;
+      position: fixed;
+      z-index: 30;
+      top: 50%;
+      left: 50%;
       transform: translate(-50%, -50%);
-      padding: 16px 26px; font-size: 18px; font-weight: bold;
-      border: 0; border-radius: 12px; background: orange;
+      padding: 16px 24px;
+      border: none;
+      border-radius: 12px;
+      background: #ffb52e;
+      color: #111;
+      font-size: 18px;
+      font-weight: bold;
+    }
+
+    #start:disabled {
+      opacity: 0.65;
+    }
+
+    #retry {
+      display: none;
+      position: fixed;
+      z-index: 31;
+      top: calc(50% + 65px);
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 12px 18px;
+      border: none;
+      border-radius: 10px;
     }
   </style>
 </head>
@@ -28,20 +68,24 @@
 <body>
   <div id="status">กำลังตรวจสอบไฟล์ AR...</div>
   <button id="start" disabled>กำลังโหลด...</button>
+  <button id="retry">ลองอีกครั้ง</button>
 
   <a-scene
     id="scene"
-    mindar-image="imageTargetSrc: ./assets/targets.mind; autoStart: false; uiLoading: no; uiScanning: yes;"
+    mindar-image="imageTargetSrc: ./targets.mind; autoStart: false; uiLoading: no; uiScanning: yes;"
     color-space="sRGB"
     renderer="colorManagement: true"
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false">
 
-    <a-assets timeout="15000">
-      <img id="info" src="./assets/infographic.png">
+    <a-assets timeout="20000">
+      <img id="info" src="./infographic.png" crossorigin="anonymous">
     </a-assets>
 
-    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
+    <a-camera
+      position="0 0 0"
+      look-controls="enabled: false">
+    </a-camera>
 
     <a-entity id="target" mindar-image-target="targetIndex: 0">
       <a-plane
@@ -53,86 +97,138 @@
     </a-entity>
   </a-scene>
 
-  <audio id="voice" src="./assets/voice.mp3" preload="auto"></audio>
+  <audio id="voice" src="./voice.mp3" preload="auto"></audio>
 
   <script>
     const scene = document.querySelector("#scene");
-    const start = document.querySelector("#start");
+    const startButton = document.querySelector("#start");
+    const retryButton = document.querySelector("#retry");
     const statusBox = document.querySelector("#status");
     const target = document.querySelector("#target");
-    const voice = document.querySelector("#voice");
     const info = document.querySelector("#info");
+    const voice = document.querySelector("#voice");
 
-    let started = false;
+    let arStarted = false;
+    let targetVisible = false;
 
     function showError(message) {
       statusBox.textContent = message;
-      start.disabled = false;
-      start.textContent = "ลองเริ่มใหม่";
-      start.style.display = "block";
+      startButton.style.display = "none";
+      retryButton.style.display = "block";
+      retryButton.disabled = false;
     }
 
-    // ตรวจสอบไฟล์ภาพและเสียงก่อนเปิดกล้อง
-    Promise.all([
-      new Promise((resolve, reject) => {
-        info.onload = resolve;
-        info.onerror = () => reject(new Error(
-          "ไม่พบ assets/infographic.png"
-        ));
-        if (info.complete && info.naturalWidth > 0) resolve();
-      }),
-      new Promise((resolve, reject) => {
-        voice.addEventListener("canplaythrough", resolve, { once: true });
-        voice.addEventListener("error", () => reject(new Error(
-          "ไม่พบ assets/voice.mp3 หรือไฟล์เสียงเปิดไม่ได้"
-        )), { once: true });
-        voice.load();
-      })
-    ]).then(() => {
-      statusBox.textContent = "พร้อมใช้งาน กดเริ่มสแกน AR";
-      start.disabled = false;
-      start.textContent = "เริ่มสแกน AR";
-    }).catch(error => {
-      console.error(error);
-      showError("โหลดไฟล์ไม่สำเร็จ: " + error.message);
-    });
+    function checkImage() {
+      return new Promise((resolve, reject) => {
+        if (info.complete && info.naturalWidth > 0) {
+          resolve();
+          return;
+        }
 
-    start.addEventListener("click", async () => {
-      if (started) return;
+        info.onload = () => resolve();
+        info.onerror = () => reject(
+          new Error("โหลด infographic.png ไม่ได้")
+        );
+
+        setTimeout(() => {
+          if (!info.complete || info.naturalWidth === 0) {
+            reject(new Error("โหลด infographic.png ไม่สำเร็จ กรุณาตรวจชื่อไฟล์"));
+          }
+        }, 15000);
+      });
+    }
+
+    async function preparePage() {
+      statusBox.textContent = "กำลังตรวจสอบรูปอินโฟกราฟิก...";
 
       try {
-        statusBox.textContent = "กำลังเปิดกล้องและโหลด Target...";
-        start.disabled = true;
+        await checkImage();
 
+        statusBox.textContent =
+          "โหลดรูปแล้ว กดปุ่มเพื่อเปิดกล้องและสแกน Target";
+
+        startButton.disabled = false;
+        startButton.textContent = "เริ่มสแกน AR";
+      } catch (error) {
+        console.error(error);
+        showError(error.message);
+      }
+    }
+
+    async function startAR() {
+      if (arStarted) return;
+
+      startButton.disabled = true;
+      retryButton.style.display = "none";
+      statusBox.textContent = "กำลังเปิดกล้องและโหลด Target...";
+
+      try {
         const arSystem = scene.systems["mindar-image-system"];
+
+        if (!arSystem) {
+          throw new Error("ระบบ MindAR โหลดไม่สำเร็จ กรุณารีเฟรชเว็บ");
+        }
+
         await arSystem.start();
 
-        started = true;
-        start.style.display = "none";
+        arStarted = true;
+        startButton.style.display = "none";
         statusBox.textContent = "กำลังสแกนรูป Target";
+
+        // แจ้งเตือนหากไม่พบ Target ภายในเวลาที่กำหนด
+        setTimeout(() => {
+          if (arStarted && !targetVisible) {
+            statusBox.textContent =
+              "ยังไม่พบ Target: ให้ส่องรูปต้นฉบับให้ชัดและเต็มกรอบ";
+          }
+        }, 15000);
 
       } catch (error) {
         console.error("AR start error:", error);
-        showError("เริ่ม AR ไม่สำเร็จ กรุณารีเฟรชและอนุญาตใช้กล้อง");
+        arStarted = false;
+        showError(
+          "เปิด AR ไม่สำเร็จ กรุณาอนุญาตใช้กล้องและเปิดผ่าน Safari หรือ Chrome"
+        );
       }
+    }
+
+    startButton.addEventListener("click", startAR);
+    retryButton.addEventListener("click", () => {
+      window.location.reload();
     });
 
     target.addEventListener("targetFound", async () => {
-      statusBox.textContent = "พบ Target แล้ว! กำลังเล่นเสียง";
+      targetVisible = true;
+      statusBox.textContent = "พบ Target แล้ว! กำลังเล่นเสียงบรรยาย";
+
       try {
         voice.currentTime = 0;
         await voice.play();
       } catch (error) {
         console.error("Audio error:", error);
-        statusBox.textContent = "พบ Target แล้ว แต่เสียงเล่นไม่ได้";
+        statusBox.textContent =
+          "พบ Target แล้ว แต่เสียงเล่นไม่ได้ กรุณาตรวจไฟล์ voice.mp3";
       }
     });
 
     target.addEventListener("targetLost", () => {
-      statusBox.textContent = "ไม่พบ Target กรุณาสแกนรูปใหม่";
+      targetVisible = false;
+      statusBox.textContent = "ไม่พบ Target กรุณาส่องรูปอีกครั้ง";
+
       voice.pause();
       voice.currentTime = 0;
     });
+
+    scene.addEventListener("arReady", () => {
+      console.log("MindAR is ready");
+    });
+
+    scene.addEventListener("arError", event => {
+      console.error("MindAR error:", event);
+      showError("ระบบ AR มีปัญหา กรุณารีเฟรชหน้าเว็บ");
+    });
+
+    preparePage();
   </script>
 </body>
 </html>
