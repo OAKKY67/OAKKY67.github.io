@@ -1,35 +1,134 @@
 
-document.querySelector('a-scene').addEventListener('arReady', () => {
-  const THREE = AFRAME.THREE;
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
-  const texture = new THREE.TextureLoader().load(
-    'https://oakky67.github.io/face.png',
-    (texture) => {
-      texture.colorSpace = THREE.SRGBColorSpace;
+  <title>Face Tracking - OAKKY67</title>
 
-      const mesh = document.querySelector('#face')
-        .getObject3D('mesh');
+  <!-- A-Frame -->
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
 
-      if (!mesh) {
-        console.error('ไม่พบ Face Mesh');
-        return;
-      }
+  <!-- MindAR Face Tracking -->
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
 
-      mesh.material.dispose();
-
-      mesh.material = new THREE.MeshBasicMaterial({
-        map: texture,
-        transparent: true,
-        opacity: 1,
-        side: THREE.DoubleSide,
-        depthWrite: false
-      });
-
-      mesh.frustumCulled = false;
-    },
-    undefined,
-    (error) => {
-      console.error('โหลด face.png ไม่สำเร็จ', error);
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: #000;
     }
-  );
-});
+
+    a-scene {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+    }
+  </style>
+</head>
+
+<body>
+
+  <a-scene
+    mindar-face="faceOccluder: false"
+    embedded
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false"
+    renderer="colorManagement: true">
+
+    <!-- Face Mesh สำหรับติดตามใบหน้า -->
+    <a-entity
+      id="face"
+      mindar-face-default-face-occluder>
+    </a-entity>
+
+    <!-- Camera -->
+    <a-camera
+      active="false"
+      position="0 0 0">
+    </a-camera>
+
+  </a-scene>
+
+  <script>
+    const scene = document.querySelector("a-scene");
+    let textureLoader;
+
+    scene.addEventListener("arReady", () => {
+      const THREE = AFRAME.THREE;
+
+      console.log("MindAR Face Tracking Ready");
+
+      // URL รูปของนายบน GitHub Pages
+      const imageURL = "https://oakky67.github.io/face.png";
+
+      textureLoader = new THREE.TextureLoader();
+
+      textureLoader.load(
+        imageURL,
+
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+
+          // ค้นหา Face Mesh
+          const face = document.querySelector("#face");
+          const mesh = face.getObject3D("mesh");
+
+          if (!mesh) {
+            console.error(
+              "ไม่พบ Face Mesh กรุณาตรวจสอบ MindAR"
+            );
+            return;
+          }
+
+          // เปลี่ยนวัสดุเป็นรูปของเรา
+          const oldMaterial = mesh.material;
+
+          mesh.material = new THREE.MeshBasicMaterial({
+            map: texture,
+            transparent: true,
+            opacity: 1,
+            side: THREE.DoubleSide,
+            depthWrite: false
+          });
+
+          // ล้างวัสดุเดิม
+          if (oldMaterial) {
+            if (Array.isArray(oldMaterial)) {
+              oldMaterial.forEach((material) => {
+                material.dispose();
+              });
+            } else {
+              oldMaterial.dispose();
+            }
+          }
+
+          // ให้ Face Mesh แสดงผลตลอด
+          mesh.frustumCulled = false;
+
+          console.log("โหลด face.png สำเร็จ");
+        },
+
+        undefined,
+
+        (error) => {
+          console.error(
+            "โหลด face.png ไม่สำเร็จ ตรวจสอบ URL รูปภาพ",
+            error
+          );
+        }
+      );
+    });
+
+    scene.addEventListener("arError", (event) => {
+      console.error("MindAR Error:", event);
+    });
+  </script>
+
+</body>
+</html>
