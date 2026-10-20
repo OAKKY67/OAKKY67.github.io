@@ -2,14 +2,12 @@
 <!DOCTYPE html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Face Tracking 3D Avatar</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Avatar Face Tracking</title>
 
   <style>
-    * {
-      box-sizing: border-box;
-    }
+    * { box-sizing: border-box; }
 
     html, body {
       margin: 0;
@@ -20,7 +18,6 @@
       font-family: Arial, sans-serif;
     }
 
-    /* กล้อง */
     #video {
       position: fixed;
       inset: 0;
@@ -31,7 +28,6 @@
       z-index: 0;
     }
 
-    /* พื้นที่แสดงโมเดล 3D */
     #three-canvas {
       position: fixed;
       inset: 0;
@@ -41,7 +37,6 @@
       pointer-events: none;
     }
 
-    /* แผงควบคุม */
     #panel {
       position: fixed;
       top: 12px;
@@ -49,27 +44,27 @@
       z-index: 5;
       padding: 12px 15px;
       color: white;
-      background: rgba(0, 0, 0, 0.65);
+      background: rgba(0, 0, 0, 0.72);
       border-radius: 12px;
       font-size: 13px;
-      max-width: 290px;
-      line-height: 1.6;
+      line-height: 1.7;
+      max-width: 300px;
+    }
+
+    #status {
+      overflow-wrap: anywhere;
+      color: #b8ffb8;
     }
 
     #startButton {
       margin-top: 8px;
-      padding: 9px 14px;
+      padding: 10px 14px;
       border: 0;
       border-radius: 7px;
       background: #4caf50;
       color: white;
       cursor: pointer;
       font-size: 14px;
-    }
-
-    #status {
-      color: #b8ffb8;
-      overflow-wrap: anywhere;
     }
   </style>
 </head>
@@ -79,19 +74,19 @@
   <canvas id="three-canvas"></canvas>
 
   <div id="panel">
-    <strong>3D Face Tracking</strong>
-    <div id="status">กดปุ่มเพื่อเปิดกล้อง</div>
-    <button id="startButton">เปิดกล้องและเริ่มติดตาม</button>
-    <div>หันซ้าย–ขวา / ก้ม–เงย / เอียงหัว</div>
+    <strong>3D Avatar Face Tracking</strong>
+    <div id="status">กดปุ่มเพื่อเริ่มต้น</div>
+    <button id="startButton">เปิดกล้อง</button>
+    <div>กระพริบตา · อ้าปาก · ยิ้ม · หันหัว</div>
   </div>
 
   <script type="importmap">
-    {
-      "imports": {
-        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
-      }
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
     }
+  }
   </script>
 
   <script type="module">
@@ -103,7 +98,7 @@
     } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
 
     // =========================================
-    // 1. ตั้งค่าเริ่มต้น
+    // 1. ตั้งค่าฉาก
     // =========================================
 
     const video = document.getElementById("video");
@@ -116,11 +111,12 @@
     const camera = new THREE.OrthographicCamera(
       -1, 1, 1, -1, 0.01, 100
     );
+
     camera.position.set(0, 0, 10);
     camera.lookAt(0, 0, 0);
 
     const renderer = new THREE.WebGLRenderer({
-      canvas,
+      canvas: canvas,
       alpha: true,
       antialias: true
     });
@@ -137,14 +133,26 @@
 
     let faceLandmarker = null;
     let avatar = null;
+    let modelScene = null;
     let modelWidth = 1;
-    let modelHeight = 1;
     let morphTargets = [];
 
     let lastVideoTime = -1;
     let trackingStarted = false;
 
-    // ค่าที่ใช้ให้การเคลื่อนไหวลื่นไหล
+    // =========================================
+    // 2. ปรับความไวของระบบได้ตรงนี้
+    // =========================================
+
+    const SETTINGS = {
+      yawStrength: 1.5,      // หันซ้าย-ขวา
+      pitchStrength: 1.6,    // ก้ม-เงย
+      rollStrength: 1.0,     // เอียงหัว
+      smoothness: 0.18,      // ความลื่นไหล
+      headSize: 2.5,         // ขนาดโมเดล
+      verticalOffset: -0.10  // ตำแหน่งขึ้น-ลง
+    };
+
     const tracking = {
       x: 0,
       y: 0,
@@ -154,7 +162,6 @@
       roll: 0
     };
 
-    // ค่าปลายทางที่อ่านจากใบหน้า
     const target = {
       x: 0,
       y: 0,
@@ -164,34 +171,22 @@
       roll: 0
     };
 
-    // ปรับความแรงของการหมุนหัวได้ตรงนี้
-    const SETTINGS = {
-      yawStrength: 1.5,
-      pitchStrength: 1.6,
-      rollStrength: 1.0,
-      smoothness: 0.18,
-
-      // ปรับขนาดโมเดลเทียบกับระยะห่างระหว่างตา
-      headSize: 2.5,
-
-      // เลื่อนโมเดลขึ้นหรือลง
-      verticalOffset: -0.10
-    };
-
     // =========================================
-    // 2. โหลดโมเดล 3D
+    // 3. โหลด robot_head6.glb
     // =========================================
 
     async function loadAvatar() {
-      statusText.textContent = "กำลังโหลดโมเดล 3D...";
+      statusText.textContent = "กำลังโหลด robot_head6.glb...";
 
       const loader = new GLTFLoader();
-      const gltf = await loader.loadAsync("./robot_head4.glb");
 
-      const modelScene = gltf.scene;
+      // ไฟล์ GLB ต้องอยู่ในโฟลเดอร์เดียวกับ HTML
+      const gltf = await loader.loadAsync("./robot_head6.glb");
 
+      modelScene = gltf.scene;
       modelScene.updateMatrixWorld(true);
 
+      // หาจุดกึ่งกลางและขนาดของโมเดล
       const bounds = new THREE.Box3().setFromObject(modelScene);
       const center = new THREE.Vector3();
       const size = new THREE.Vector3();
@@ -200,46 +195,53 @@
       bounds.getSize(size);
 
       modelWidth = Math.max(size.x, 0.001);
-      modelHeight = Math.max(size.y, 0.001);
 
-      // จัดจุดกึ่งกลางโมเดลให้อยู่ตรงกลาง
+      // จัดโมเดลให้อยู่กึ่งกลาง Group
       modelScene.position.sub(center);
 
-      // ใช้ Group เป็นตัวควบคุมตำแหน่งและการหมุนหัว
       avatar = new THREE.Group();
       avatar.add(modelScene);
       scene.add(avatar);
 
-      // เก็บ Shape Keys ที่อยู่ในโมเดล
+      // เก็บ Shape Keys จากทุก Mesh
       morphTargets = [];
 
       modelScene.traverse((object) => {
-        if (!object.isMesh || !object.morphTargetDictionary ||
-            !object.morphTargetInfluences) {
-          return;
+        if (
+          object.isMesh &&
+          object.morphTargetDictionary &&
+          object.morphTargetInfluences
+        ) {
+          morphTargets.push({
+            name: object.name,
+            dictionary: object.morphTargetDictionary,
+            influences: object.morphTargetInfluences
+          });
         }
-
-        morphTargets.push({
-          dictionary: object.morphTargetDictionary,
-          influences: object.morphTargetInfluences
-        });
       });
 
-      console.log("Shape Keys ของโมเดล:");
+      console.log("Shape Keys ที่พบในโมเดล:");
 
       for (const mesh of morphTargets) {
-        console.log(Object.keys(mesh.dictionary));
+        console.log(mesh.name, Object.keys(mesh.dictionary));
+      }
+
+      // ตั้งค่าทุก Shape Key ให้เริ่มต้นที่ 0
+      for (const mesh of morphTargets) {
+        for (let i = 0; i < mesh.influences.length; i++) {
+          mesh.influences[i] = 0;
+        }
       }
 
       statusText.textContent = "โหลดโมเดลสำเร็จ";
     }
 
     // =========================================
-    // 3. ตั้งค่าระบบตรวจจับใบหน้า
+    // 4. เปิด MediaPipe Face Landmarker
     // =========================================
 
     async function setupFaceTracking() {
-      statusText.textContent = "กำลังเตรียมระบบตรวจจับใบหน้า...";
+      statusText.textContent = "กำลังโหลดระบบตรวจจับใบหน้า...";
 
       const vision = await FilesetResolver.forVisionTasks(
         "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
@@ -253,7 +255,6 @@
               "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
             delegate: "GPU"
           },
-
           runningMode: "VIDEO",
           numFaces: 1,
           outputFaceBlendshapes: true,
@@ -263,7 +264,7 @@
     }
 
     // =========================================
-    // 4. เปิดกล้อง
+    // 5. เปิดกล้องเว็บแคม
     // =========================================
 
     async function startCamera() {
@@ -278,15 +279,16 @@
 
       video.srcObject = stream;
 
-      await new Promise((resolve) => {
+      await new Promise((resolve, reject) => {
         video.onloadedmetadata = resolve;
+        video.onerror = reject;
       });
 
       await video.play();
     }
 
     // =========================================
-    // 5. แปลงพิกัดใบหน้าให้ตรงกับภาพกล้อง
+    // 6. แปลงตำแหน่งใบหน้าให้ตรงกับภาพกล้อง
     // =========================================
 
     function getScreenPoint(point) {
@@ -296,7 +298,7 @@
       let x = point.x;
       let y = point.y;
 
-      // คำนวณพื้นที่ที่ถูกตัดออกจาก object-fit: cover
+      // ชดเชยการครอปภาพของ object-fit: cover
       if (videoAspect > screenAspect) {
         const visibleWidth = screenAspect / videoAspect;
         x = (x - (1 - visibleWidth) / 2) / visibleWidth;
@@ -305,7 +307,7 @@
         y = (y - (1 - visibleHeight) / 2) / visibleHeight;
       }
 
-      // ภาพกล้องถูกกลับซ้าย-ขวาด้วย CSS
+      // กล้องแสดงผลแบบกลับซ้าย-ขวา
       x = 1 - x;
 
       return {
@@ -315,7 +317,7 @@
     }
 
     // =========================================
-    // 6. ตรวจจับการหันหัวและขยับตำแหน่ง
+    // 7. ตรวจจับตำแหน่งและการหมุนหัว
     // =========================================
 
     function updateHead(landmarks) {
@@ -327,43 +329,30 @@
       const forehead = landmarks[10];
       const chin = landmarks[152];
 
-      // ตำแหน่งกึ่งกลางระหว่างดวงตา
       const eyeCenter = {
         x: (leftEye.x + rightEye.x) / 2,
         y: (leftEye.y + rightEye.y) / 2
       };
 
+      // ตำแหน่งหัวบนหน้าจอ
       const screenPoint = getScreenPoint(eyeCenter);
 
       target.x = screenPoint.x;
       target.y = screenPoint.y + SETTINGS.verticalOffset;
 
-      // คำนวณระยะห่างระหว่างดวงตาเพื่อปรับขนาดโมเดล
-      const eyeDx = rightEye.x - leftEye.x;
-      const eyeDy = rightEye.y - leftEye.y;
-      const eyeDistance = Math.sqrt(eyeDx * eyeDx + eyeDy * eyeDy);
+      // ปรับขนาดจากระยะห่างระหว่างดวงตา
+      const dx = rightEye.x - leftEye.x;
+      const dy = rightEye.y - leftEye.y;
+      const eyeDistance = Math.sqrt(dx * dx + dy * dy);
 
-      const videoAspect = video.videoWidth / video.videoHeight;
-      const screenAspect = window.innerWidth / window.innerHeight;
+      target.scale = Math.max(
+        (eyeDistance * 2 * SETTINGS.headSize) / modelWidth,
+        0.001
+      );
 
-      let adjustedEyeDistance = eyeDistance;
-
-      if (videoAspect > screenAspect) {
-        adjustedEyeDistance *= videoAspect / screenAspect;
-      } else {
-        adjustedEyeDistance *= 1;
-      }
-
-      target.scale =
-        (adjustedEyeDistance * 2 * SETTINGS.headSize) / modelWidth;
-
-      // -----------------------------------------
-      // หันซ้าย-ขวา (Yaw)
-      // ใช้ตำแหน่งจมูกเทียบกับกึ่งกลางตา
-      // -----------------------------------------
-
+      // หันซ้าย-ขวาโดยประมาณจากตำแหน่งจมูก
       const eyeWidth = Math.max(
-        Math.sqrt(eyeDx * eyeDx + eyeDy * eyeDy),
+        Math.sqrt(dx * dx + dy * dy),
         0.001
       );
 
@@ -375,10 +364,7 @@
         0.8
       );
 
-      // -----------------------------------------
-      // ก้ม-เงย (Pitch)
-      // -----------------------------------------
-
+      // ก้ม-เงยโดยประมาณจากตำแหน่งจมูก
       const faceHeight = Math.max(chin.y - forehead.y, 0.001);
       const noseRelativeY = (nose.y - forehead.y) / faceHeight;
 
@@ -388,10 +374,7 @@
         0.6
       );
 
-      // -----------------------------------------
-      // เอียงหัว (Roll)
-      // -----------------------------------------
-
+      // เอียงหัวจากแนวตา
       const eyeAngle = Math.atan2(
         rightEye.y - leftEye.y,
         rightEye.x - leftEye.x
@@ -405,22 +388,26 @@
     }
 
     // =========================================
-    // 7. ขยับ Shape Keys ของดวงตา
+    // 8. ควบคุม Shape Keys
     // =========================================
 
     function setMorph(name, value) {
+      const amount = THREE.MathUtils.clamp(value, 0, 1);
+
       for (const mesh of morphTargets) {
         const index = mesh.dictionary[name];
 
         if (index !== undefined) {
-          mesh.influences[index] = THREE.MathUtils.clamp(value, 0, 1);
+          mesh.influences[index] = amount;
         }
       }
     }
 
     function updateBlendshapes(results) {
-      if (!results.faceBlendshapes ||
-          results.faceBlendshapes.length === 0) {
+      if (
+        !results.faceBlendshapes ||
+        results.faceBlendshapes.length === 0
+      ) {
         return;
       }
 
@@ -431,24 +418,28 @@
         scores[category.categoryName] = category.score;
       }
 
-      // กระพริบตาซ้ายและขวา
+      // กระพริบตา
       setMorph("eyeBlinkLeft", scores.eyeBlinkLeft || 0);
       setMorph("eyeBlinkRight", scores.eyeBlinkRight || 0);
 
-      // ถ้าโมเดลมี Shape Keys เหล่านี้ ก็จะขยับตามด้วย
-      setMorph("mouthOpen", scores.jawOpen || 0);
-      setMorph("smile", Math.max(
-        scores.mouthSmileLeft || 0,
-        scores.mouthSmileRight || 0
-      ));
-      setMorph("frown", Math.max(
-        scores.mouthFrownLeft || 0,
-        scores.mouthFrownRight || 0
-      ));
+      // อ้าปาก
+      setMorph("jawOpen", scores.jawOpen || 0);
+
+      // ยิ้มซ้าย-ขวา
+      setMorph("mouthSmileLeft", scores.mouthSmileLeft || 0);
+      setMorph("mouthSmileRight", scores.mouthSmileRight || 0);
+
+      // ทำหน้าบึ้งซ้าย-ขวา
+      setMorph("mouthFrownLeft", scores.mouthFrownLeft || 0);
+      setMorph("mouthFrownRight", scores.mouthFrownRight || 0);
+
+      // ขยับสายตาเข้าด้านใน
+      setMorph("eyeLookInLeft", scores.eyeLookInLeft || 0);
+      setMorph("eyeLookInRight", scores.eyeLookInRight || 0);
     }
 
     // =========================================
-    // 8. ลูปตรวจจับใบหน้าตลอดเวลา
+    // 9. ตรวจจับใบหน้าทุกเฟรม
     // =========================================
 
     function detectFace() {
@@ -476,10 +467,11 @@
 
             statusText.textContent = "ตรวจพบใบหน้าแล้ว ✓";
           } else {
-            statusText.textContent = "ไม่พบใบหน้า ลองหันเข้ากล้อง";
+            statusText.textContent = "ไม่พบใบหน้า";
           }
         } catch (error) {
           console.error("Face tracking error:", error);
+          statusText.textContent = "เกิดข้อผิดพลาดในการตรวจจับ";
         }
       }
 
@@ -487,7 +479,7 @@
     }
 
     // =========================================
-    // 9. ทำให้โมเดลขยับอย่างนุ่มนวล
+    // 10. แสดงโมเดลและทำให้การเคลื่อนไหวลื่นไหล
     // =========================================
 
     function animate() {
@@ -504,14 +496,12 @@
         tracking.pitch += (target.pitch - tracking.pitch) * smooth;
         tracking.roll += (target.roll - tracking.roll) * smooth;
 
-        // ตำแหน่งและขนาด
         avatar.position.x = tracking.x;
         avatar.position.y = tracking.y;
 
-        const finalScale = Math.max(tracking.scale, 0.001);
-        avatar.scale.setScalar(finalScale);
+        avatar.scale.setScalar(Math.max(tracking.scale, 0.001));
 
-        // หมุนโมเดลตามหัวจริง
+        // หมุนหัวตามค่าที่อ่านได้
         avatar.rotation.order = "YXZ";
         avatar.rotation.y = tracking.yaw;
         avatar.rotation.x = tracking.pitch;
@@ -522,7 +512,7 @@
     }
 
     // =========================================
-    // 10. ปรับขนาดตามหน้าจอ
+    // 11. ปรับหน้าจอเมื่อเปลี่ยนขนาด
     // =========================================
 
     function resize() {
@@ -532,6 +522,7 @@
       camera.right = aspect;
       camera.top = 1;
       camera.bottom = -1;
+
       camera.updateProjectionMatrix();
 
       renderer.setSize(window.innerWidth, window.innerHeight);
@@ -541,11 +532,12 @@
     resize();
 
     // =========================================
-    // 11. เริ่มต้นทั้งหมด
+    // 12. เริ่มใช้งาน
     // =========================================
 
     startButton.addEventListener("click", async () => {
       startButton.disabled = true;
+      statusText.textContent = "กำลังเริ่มต้นระบบ...";
 
       try {
         await startCamera();
