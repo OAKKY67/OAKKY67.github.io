@@ -3,7 +3,7 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AR Infographic</title>
 
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
@@ -11,64 +11,47 @@
 
   <style>
     * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      font-family: sans-serif;
-      background: #111;
-    }
+    body { margin: 0; font-family: sans-serif; background: #111; }
 
     #status {
       position: fixed;
-      z-index: 20;
+      z-index: 10;
       top: 12px;
       left: 12px;
       right: 12px;
-      padding: 14px;
-      border-radius: 10px;
+      padding: 15px;
+      border-radius: 12px;
       color: white;
-      background: rgba(15, 35, 60, 0.92);
+      background: #263b55ee;
       text-align: center;
       line-height: 1.5;
     }
 
     #start {
       position: fixed;
-      z-index: 30;
+      z-index: 20;
       top: 50%;
       left: 50%;
       transform: translate(-50%, -50%);
       padding: 16px 24px;
-      border: none;
+      border: 0;
       border-radius: 12px;
-      background: #ffb52e;
+      background: orange;
       color: #111;
       font-size: 18px;
       font-weight: bold;
     }
 
-    #start:disabled {
-      opacity: 0.65;
-    }
-
-    #retry {
-      display: none;
+    a-scene {
       position: fixed;
-      z-index: 31;
-      top: calc(50% + 65px);
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 12px 18px;
-      border: none;
-      border-radius: 10px;
+      inset: 0;
     }
   </style>
 </head>
 
 <body>
-  <div id="status">กำลังตรวจสอบไฟล์ AR...</div>
+  <div id="status">กำลังตรวจสอบไฟล์...</div>
   <button id="start" disabled>กำลังโหลด...</button>
-  <button id="retry">ลองอีกครั้ง</button>
 
   <a-scene
     id="scene"
@@ -78,8 +61,8 @@
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false">
 
-    <a-assets timeout="20000">
-      <img id="info" src="./infographic.png" crossorigin="anonymous">
+    <a-assets timeout="15000">
+      <img id="info" src="./infographic.png">
     </a-assets>
 
     <a-camera
@@ -101,134 +84,118 @@
 
   <script>
     const scene = document.querySelector("#scene");
-    const startButton = document.querySelector("#start");
-    const retryButton = document.querySelector("#retry");
     const statusBox = document.querySelector("#status");
-    const target = document.querySelector("#target");
+    const startButton = document.querySelector("#start");
     const info = document.querySelector("#info");
     const voice = document.querySelector("#voice");
+    const target = document.querySelector("#target");
 
-    let arStarted = false;
-    let targetVisible = false;
+    let started = false;
+    let targetFound = false;
 
-    function showError(message) {
+    function errorMessage(message) {
       statusBox.textContent = message;
-      startButton.style.display = "none";
-      retryButton.style.display = "block";
-      retryButton.disabled = false;
+      startButton.disabled = false;
+      startButton.textContent = "โหลดใหม่";
+      startButton.onclick = () => location.reload();
     }
 
-    function checkImage() {
-      return new Promise((resolve, reject) => {
-        if (info.complete && info.naturalWidth > 0) {
-          resolve();
-          return;
-        }
-
-        info.onload = () => resolve();
-        info.onerror = () => reject(
-          new Error("โหลด infographic.png ไม่ได้")
-        );
-
-        setTimeout(() => {
-          if (!info.complete || info.naturalWidth === 0) {
-            reject(new Error("โหลด infographic.png ไม่สำเร็จ กรุณาตรวจชื่อไฟล์"));
-          }
-        }, 15000);
-      });
+    async function checkFile(url, label) {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error("ไม่พบไฟล์ " + label + " (HTTP " + response.status + ")");
+      }
     }
 
-    async function preparePage() {
-      statusBox.textContent = "กำลังตรวจสอบรูปอินโฟกราฟิก...";
-
+    async function initialize() {
       try {
-        await checkImage();
+        statusBox.textContent = "กำลังตรวจสอบไฟล์ Target และรูปภาพ...";
 
-        statusBox.textContent =
-          "โหลดรูปแล้ว กดปุ่มเพื่อเปิดกล้องและสแกน Target";
+        await Promise.all([
+          checkFile("./targets.mind", "targets.mind"),
+          checkFile("./infographic.png", "infographic.png"),
+          checkFile("./voice.mp3", "voice.mp3")
+        ]);
 
+        await new Promise((resolve, reject) => {
+          if (info.complete && info.naturalWidth > 0) {
+            resolve();
+          } else {
+            info.onload = resolve;
+            info.onerror = () => reject(
+              new Error("เปิด infographic.png ไม่ได้")
+            );
+          }
+        });
+
+        statusBox.textContent = "ไฟล์ครบแล้ว กดเริ่มสแกน AR";
         startButton.disabled = false;
         startButton.textContent = "เริ่มสแกน AR";
+        startButton.onclick = startAR;
+
       } catch (error) {
         console.error(error);
-        showError(error.message);
+        errorMessage("โหลดไฟล์ไม่สำเร็จ: " + error.message);
       }
     }
 
     async function startAR() {
-      if (arStarted) return;
+      if (started) return;
 
       startButton.disabled = true;
-      retryButton.style.display = "none";
-      statusBox.textContent = "กำลังเปิดกล้องและโหลด Target...";
+      statusBox.textContent = "กำลังเปิดกล้องและโหลดระบบ AR...";
 
       try {
-        const arSystem = scene.systems["mindar-image-system"];
+        const system = scene.systems["mindar-image-system"];
+        if (!system) throw new Error("โหลด MindAR ไม่สำเร็จ");
 
-        if (!arSystem) {
-          throw new Error("ระบบ MindAR โหลดไม่สำเร็จ กรุณารีเฟรชเว็บ");
-        }
-
-        await arSystem.start();
-
-        arStarted = true;
+        await system.start();
+        started = true;
         startButton.style.display = "none";
         statusBox.textContent = "กำลังสแกนรูป Target";
 
-        // แจ้งเตือนหากไม่พบ Target ภายในเวลาที่กำหนด
         setTimeout(() => {
-          if (arStarted && !targetVisible) {
+          if (started && !targetFound) {
             statusBox.textContent =
-              "ยังไม่พบ Target: ให้ส่องรูปต้นฉบับให้ชัดและเต็มกรอบ";
+              "ยังไม่พบ Target: ส่องรูปต้นฉบับให้ชัดและเต็มกรอบ";
           }
         }, 15000);
 
       } catch (error) {
-        console.error("AR start error:", error);
-        arStarted = false;
-        showError(
-          "เปิด AR ไม่สำเร็จ กรุณาอนุญาตใช้กล้องและเปิดผ่าน Safari หรือ Chrome"
+        console.error(error);
+        started = false;
+        errorMessage(
+          "เปิดกล้องหรือระบบ AR ไม่สำเร็จ กรุณาอนุญาตกล้องและลองใหม่"
         );
       }
     }
 
-    startButton.addEventListener("click", startAR);
-    retryButton.addEventListener("click", () => {
-      window.location.reload();
-    });
-
     target.addEventListener("targetFound", async () => {
-      targetVisible = true;
+      targetFound = true;
       statusBox.textContent = "พบ Target แล้ว! กำลังเล่นเสียงบรรยาย";
 
       try {
         voice.currentTime = 0;
         await voice.play();
       } catch (error) {
-        console.error("Audio error:", error);
-        statusBox.textContent =
-          "พบ Target แล้ว แต่เสียงเล่นไม่ได้ กรุณาตรวจไฟล์ voice.mp3";
+        console.error(error);
+        statusBox.textContent = "พบ Target แล้ว แต่เล่นเสียงไม่ได้";
       }
     });
 
     target.addEventListener("targetLost", () => {
-      targetVisible = false;
+      targetFound = false;
       statusBox.textContent = "ไม่พบ Target กรุณาส่องรูปอีกครั้ง";
-
       voice.pause();
       voice.currentTime = 0;
     });
 
-    scene.addEventListener("arReady", () => {
-      console.log("MindAR is ready");
-    });
-
     scene.addEventListener("arError", event => {
       console.error("MindAR error:", event);
-      showError("ระบบ AR มีปัญหา กรุณารีเฟรชหน้าเว็บ");
+      errorMessage("ระบบ AR เกิดข้อผิดพลาด กรุณารีเฟรชหน้าเว็บ");
     });
 
-    preparePage();
+    initialize();
   </script>
 </body>
 </html>
