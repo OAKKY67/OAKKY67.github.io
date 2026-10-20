@@ -3,141 +3,133 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <title>AR Infographic</title>
 
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
-    body {
-      margin: 0;
-      font-family: sans-serif;
-    }
-
-    #start {
-      position: fixed;
-      z-index: 10;
-      top: 45%;
-      left: 50%;
-      transform: translate(-50%, -50%);
-      padding: 16px 28px;
-      background: orange;
-      border: none;
-      border-radius: 12px;
-      font-size: 18px;
-      font-weight: bold;
-    }
-
+    body { margin: 0; font-family: sans-serif; }
     #status {
-      position: fixed;
-      z-index: 9;
-      top: 10px;
-      left: 10px;
-      right: 10px;
-      text-align: center;
-      color: white;
-      background: #10243dcc;
-      padding: 12px;
-      border-radius: 8px;
+      position: fixed; top: 12px; left: 12px; right: 12px;
+      z-index: 20; padding: 14px; border-radius: 10px;
+      background: #10243ddd; color: white; text-align: center;
+    }
+    #start {
+      position: fixed; z-index: 30; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 16px 26px; font-size: 18px; font-weight: bold;
+      border: 0; border-radius: 12px; background: orange;
     }
   </style>
 </head>
 
 <body>
-  <div id="status">กดเริ่ม แล้วสแกนรูป Target</div>
-  <button id="start">เริ่มสแกน AR</button>
+  <div id="status">กำลังตรวจสอบไฟล์ AR...</div>
+  <button id="start" disabled>กำลังโหลด...</button>
 
   <a-scene
-    mindar-image="
-      imageTargetSrc: ./assets/targets.mind;
-      autoStart: false;
-      uiLoading: yes;
-      uiScanning: yes;
-    "
+    id="scene"
+    mindar-image="imageTargetSrc: ./assets/targets.mind; autoStart: false; uiLoading: no; uiScanning: yes;"
     color-space="sRGB"
     renderer="colorManagement: true"
     vr-mode-ui="enabled: false"
     device-orientation-permission-ui="enabled: false">
 
-    <a-assets>
-      <img
-        id="info"
-        src="./assets/infographic.png">
+    <a-assets timeout="15000">
+      <img id="info" src="./assets/infographic.png">
     </a-assets>
 
-    <a-camera
-      position="0 0 0"
-      look-controls="enabled: false">
-    </a-camera>
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-    <!-- Target ลำดับที่ 0 -->
-    <a-entity id="target"
-      mindar-image-target="targetIndex: 0">
-
-      <!-- แสดง Infographic เมื่อพบ Target -->
+    <a-entity id="target" mindar-image-target="targetIndex: 0">
       <a-plane
         src="#info"
         position="0 0 0"
         width="1"
         height="0.5625">
       </a-plane>
-
     </a-entity>
   </a-scene>
 
-  <!-- เสียงพากย์ของคุณ -->
-  <audio id="voice"
-    src="./assets/voice.mp3"
-    preload="auto">
-  </audio>
+  <audio id="voice" src="./assets/voice.mp3" preload="auto"></audio>
 
   <script>
-    const scene = document.querySelector("a-scene");
+    const scene = document.querySelector("#scene");
+    const start = document.querySelector("#start");
+    const statusBox = document.querySelector("#status");
     const target = document.querySelector("#target");
     const voice = document.querySelector("#voice");
-    const start = document.querySelector("#start");
-    const status = document.querySelector("#status");
+    const info = document.querySelector("#info");
 
-    let visible = false;
+    let started = false;
 
-    // เริ่มเปิดกล้องหลังและระบบสแกน
+    function showError(message) {
+      statusBox.textContent = message;
+      start.disabled = false;
+      start.textContent = "ลองเริ่มใหม่";
+      start.style.display = "block";
+    }
+
+    // ตรวจสอบไฟล์ภาพและเสียงก่อนเปิดกล้อง
+    Promise.all([
+      new Promise((resolve, reject) => {
+        info.onload = resolve;
+        info.onerror = () => reject(new Error(
+          "ไม่พบ assets/infographic.png"
+        ));
+        if (info.complete && info.naturalWidth > 0) resolve();
+      }),
+      new Promise((resolve, reject) => {
+        voice.addEventListener("canplaythrough", resolve, { once: true });
+        voice.addEventListener("error", () => reject(new Error(
+          "ไม่พบ assets/voice.mp3 หรือไฟล์เสียงเปิดไม่ได้"
+        )), { once: true });
+        voice.load();
+      })
+    ]).then(() => {
+      statusBox.textContent = "พร้อมใช้งาน กดเริ่มสแกน AR";
+      start.disabled = false;
+      start.textContent = "เริ่มสแกน AR";
+    }).catch(error => {
+      console.error(error);
+      showError("โหลดไฟล์ไม่สำเร็จ: " + error.message);
+    });
+
     start.addEventListener("click", async () => {
-      try {
-        status.textContent = "กำลังเปิดกล้อง...";
-        await scene.systems["mindar-image-system"].start();
+      if (started) return;
 
+      try {
+        statusBox.textContent = "กำลังเปิดกล้องและโหลด Target...";
+        start.disabled = true;
+
+        const arSystem = scene.systems["mindar-image-system"];
+        await arSystem.start();
+
+        started = true;
         start.style.display = "none";
-        status.textContent = "กำลังสแกนรูป Target";
+        statusBox.textContent = "กำลังสแกนรูป Target";
 
       } catch (error) {
-        console.error(error);
-        status.textContent =
-          "เปิดกล้องไม่ได้ กรุณาอนุญาตใช้กล้องและใช้ HTTPS";
+        console.error("AR start error:", error);
+        showError("เริ่ม AR ไม่สำเร็จ กรุณารีเฟรชและอนุญาตใช้กล้อง");
       }
     });
 
-    // เมื่อสแกนพบ Target
     target.addEventListener("targetFound", async () => {
-      visible = true;
-      status.textContent = "พบ Target แล้ว! กำลังเล่นเสียงพากย์";
-
-      voice.currentTime = 0;
-
+      statusBox.textContent = "พบ Target แล้ว! กำลังเล่นเสียง";
       try {
+        voice.currentTime = 0;
         await voice.play();
       } catch (error) {
-        status.textContent =
-          "พบ Target แล้ว แต่เสียงถูกบล็อก กรุณาแตะหน้าจอแล้วลองใหม่";
-        console.error(error);
+        console.error("Audio error:", error);
+        statusBox.textContent = "พบ Target แล้ว แต่เสียงเล่นไม่ได้";
       }
     });
 
-    // เมื่อกล้องตรวจไม่พบ Target
     target.addEventListener("targetLost", () => {
-      visible = false;
-      status.textContent = "ไม่พบ Target กรุณาสแกนใหม่";
-
+      statusBox.textContent = "ไม่พบ Target กรุณาสแกนรูปใหม่";
       voice.pause();
       voice.currentTime = 0;
     });
