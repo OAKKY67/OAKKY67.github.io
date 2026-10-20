@@ -1,22 +1,15 @@
-```html
+
 <!DOCTYPE html>
 <html lang="th">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Robot Head AR Face Tracking</title>
-
-  <script type="importmap">
-  {
-    "imports": {
-      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-    }
-  }
-  </script>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Face Tracking 3D Avatar</title>
 
   <style>
-    * { box-sizing: border-box; }
+    * {
+      box-sizing: border-box;
+    }
 
     html, body {
       margin: 0;
@@ -24,11 +17,11 @@
       height: 100%;
       overflow: hidden;
       background: #111;
-      font-family: sans-serif;
+      font-family: Arial, sans-serif;
     }
 
-    /* ภาพกล้องเต็มหน้าจอ */
-    #camera {
+    /* กล้อง */
+    #video {
       position: fixed;
       inset: 0;
       width: 100%;
@@ -38,8 +31,8 @@
       z-index: 0;
     }
 
-    /* Canvas โมเดลอยู่เหนือภาพกล้อง */
-    #container {
+    /* พื้นที่แสดงโมเดล 3D */
+    #three-canvas {
       position: fixed;
       inset: 0;
       width: 100%;
@@ -48,339 +41,533 @@
       pointer-events: none;
     }
 
-    #container canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-
-    #status {
+    /* แผงควบคุม */
+    #panel {
       position: fixed;
-      z-index: 5;
       top: 12px;
       left: 12px;
-      padding: 10px 12px;
+      z-index: 5;
+      padding: 12px 15px;
       color: white;
-      background: #000a;
-      border-radius: 8px;
+      background: rgba(0, 0, 0, 0.65);
+      border-radius: 12px;
       font-size: 13px;
+      max-width: 290px;
+      line-height: 1.6;
     }
 
     #startButton {
-      position: fixed;
-      z-index: 10;
-      bottom: 24px;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 12px 22px;
-      border: none;
-      border-radius: 10px;
-      background: white;
-      color: black;
-      font-size: 16px;
+      margin-top: 8px;
+      padding: 9px 14px;
+      border: 0;
+      border-radius: 7px;
+      background: #4caf50;
+      color: white;
+      cursor: pointer;
+      font-size: 14px;
+    }
+
+    #status {
+      color: #b8ffb8;
+      overflow-wrap: anywhere;
     }
   </style>
 </head>
 
 <body>
-  <video id="camera" autoplay playsinline muted></video>
-  <div id="container"></div>
-  <div id="status">กดเปิดกล้องเพื่อเริ่มต้น</div>
-  <button id="startButton">เปิดกล้อง</button>
+  <video id="video" autoplay muted playsinline></video>
+  <canvas id="three-canvas"></canvas>
+
+  <div id="panel">
+    <strong>3D Face Tracking</strong>
+    <div id="status">กดปุ่มเพื่อเปิดกล้อง</div>
+    <button id="startButton">เปิดกล้องและเริ่มติดตาม</button>
+    <div>หันซ้าย–ขวา / ก้ม–เงย / เอียงหัว</div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
 
   <script type="module">
-    import * as THREE from 'three';
-    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-
+    import * as THREE from "three";
+    import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
     import {
       FaceLandmarker,
       FilesetResolver
-    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm';
+    } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm";
 
-    const video = document.querySelector('#camera');
-    const status = document.querySelector('#status');
-    const startButton = document.querySelector('#startButton');
-    const container = document.querySelector('#container');
+    // =========================================
+    // 1. ตั้งค่าเริ่มต้น
+    // =========================================
 
-    let landmarker;
-    let model;
-    let meshes = [];
-    let lastVideoTime = -1;
-    let faceFound = false;
-    let modelWidth = 1;
-    let smoothedX = 0;
-    let smoothedY = 0;
-    let smoothedScale = 1;
+    const video = document.getElementById("video");
+    const canvas = document.getElementById("three-canvas");
+    const statusText = document.getElementById("status");
+    const startButton = document.getElementById("startButton");
 
-    // ฉากโปร่งใสสำหรับวางโมเดลทับกล้อง
     const scene = new THREE.Scene();
 
+    const camera = new THREE.OrthographicCamera(
+      -1, 1, 1, -1, 0.01, 100
+    );
+    camera.position.set(0, 0, 10);
+    camera.lookAt(0, 0, 0);
+
     const renderer = new THREE.WebGLRenderer({
+      canvas,
       alpha: true,
       antialias: true
     });
 
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.setClearColor(0x000000, 0);
 
-    container.appendChild(renderer.domElement);
-
-    // กล้อง Orthographic ใช้พิกัดที่วางตามตำแหน่งหน้าจอได้ง่าย
-    const aspect = window.innerWidth / window.innerHeight;
-
-    const camera3D = new THREE.OrthographicCamera(
-      -aspect, aspect, 1, -1, 0.01, 100
-    );
-
-    camera3D.position.z = 10;
-
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x777788, 2));
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 2));
 
     const light = new THREE.DirectionalLight(0xffffff, 2);
-    light.position.set(0, 2, 5);
+    light.position.set(0, 3, 5);
     scene.add(light);
 
-    function setShape(name, value) {
-      for (const mesh of meshes) {
-        const index = mesh.morphTargetDictionary?.[name];
+    let faceLandmarker = null;
+    let avatar = null;
+    let modelWidth = 1;
+    let modelHeight = 1;
+    let morphTargets = [];
+
+    let lastVideoTime = -1;
+    let trackingStarted = false;
+
+    // ค่าที่ใช้ให้การเคลื่อนไหวลื่นไหล
+    const tracking = {
+      x: 0,
+      y: 0,
+      scale: 1,
+      yaw: 0,
+      pitch: 0,
+      roll: 0
+    };
+
+    // ค่าปลายทางที่อ่านจากใบหน้า
+    const target = {
+      x: 0,
+      y: 0,
+      scale: 1,
+      yaw: 0,
+      pitch: 0,
+      roll: 0
+    };
+
+    // ปรับความแรงของการหมุนหัวได้ตรงนี้
+    const SETTINGS = {
+      yawStrength: 1.5,
+      pitchStrength: 1.6,
+      rollStrength: 1.0,
+      smoothness: 0.18,
+
+      // ปรับขนาดโมเดลเทียบกับระยะห่างระหว่างตา
+      headSize: 2.5,
+
+      // เลื่อนโมเดลขึ้นหรือลง
+      verticalOffset: -0.10
+    };
+
+    // =========================================
+    // 2. โหลดโมเดล 3D
+    // =========================================
+
+    async function loadAvatar() {
+      statusText.textContent = "กำลังโหลดโมเดล 3D...";
+
+      const loader = new GLTFLoader();
+      const gltf = await loader.loadAsync("./robot_head4.glb");
+
+      const modelScene = gltf.scene;
+
+      modelScene.updateMatrixWorld(true);
+
+      const bounds = new THREE.Box3().setFromObject(modelScene);
+      const center = new THREE.Vector3();
+      const size = new THREE.Vector3();
+
+      bounds.getCenter(center);
+      bounds.getSize(size);
+
+      modelWidth = Math.max(size.x, 0.001);
+      modelHeight = Math.max(size.y, 0.001);
+
+      // จัดจุดกึ่งกลางโมเดลให้อยู่ตรงกลาง
+      modelScene.position.sub(center);
+
+      // ใช้ Group เป็นตัวควบคุมตำแหน่งและการหมุนหัว
+      avatar = new THREE.Group();
+      avatar.add(modelScene);
+      scene.add(avatar);
+
+      // เก็บ Shape Keys ที่อยู่ในโมเดล
+      morphTargets = [];
+
+      modelScene.traverse((object) => {
+        if (!object.isMesh || !object.morphTargetDictionary ||
+            !object.morphTargetInfluences) {
+          return;
+        }
+
+        morphTargets.push({
+          dictionary: object.morphTargetDictionary,
+          influences: object.morphTargetInfluences
+        });
+      });
+
+      console.log("Shape Keys ของโมเดล:");
+
+      for (const mesh of morphTargets) {
+        console.log(Object.keys(mesh.dictionary));
+      }
+
+      statusText.textContent = "โหลดโมเดลสำเร็จ";
+    }
+
+    // =========================================
+    // 3. ตั้งค่าระบบตรวจจับใบหน้า
+    // =========================================
+
+    async function setupFaceTracking() {
+      statusText.textContent = "กำลังเตรียมระบบตรวจจับใบหน้า...";
+
+      const vision = await FilesetResolver.forVisionTasks(
+        "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+      );
+
+      faceLandmarker = await FaceLandmarker.createFromOptions(
+        vision,
+        {
+          baseOptions: {
+            modelAssetPath:
+              "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+            delegate: "GPU"
+          },
+
+          runningMode: "VIDEO",
+          numFaces: 1,
+          outputFaceBlendshapes: true,
+          outputFacialTransformationMatrixes: true
+        }
+      );
+    }
+
+    // =========================================
+    // 4. เปิดกล้อง
+    // =========================================
+
+    async function startCamera() {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: "user",
+          width: { ideal: 1280 },
+          height: { ideal: 720 }
+        },
+        audio: false
+      });
+
+      video.srcObject = stream;
+
+      await new Promise((resolve) => {
+        video.onloadedmetadata = resolve;
+      });
+
+      await video.play();
+    }
+
+    // =========================================
+    // 5. แปลงพิกัดใบหน้าให้ตรงกับภาพกล้อง
+    // =========================================
+
+    function getScreenPoint(point) {
+      const videoAspect = video.videoWidth / video.videoHeight;
+      const screenAspect = window.innerWidth / window.innerHeight;
+
+      let x = point.x;
+      let y = point.y;
+
+      // คำนวณพื้นที่ที่ถูกตัดออกจาก object-fit: cover
+      if (videoAspect > screenAspect) {
+        const visibleWidth = screenAspect / videoAspect;
+        x = (x - (1 - visibleWidth) / 2) / visibleWidth;
+      } else {
+        const visibleHeight = videoAspect / screenAspect;
+        y = (y - (1 - visibleHeight) / 2) / visibleHeight;
+      }
+
+      // ภาพกล้องถูกกลับซ้าย-ขวาด้วย CSS
+      x = 1 - x;
+
+      return {
+        x: (x - 0.5) * 2 * screenAspect,
+        y: (0.5 - y) * 2
+      };
+    }
+
+    // =========================================
+    // 6. ตรวจจับการหันหัวและขยับตำแหน่ง
+    // =========================================
+
+    function updateHead(landmarks) {
+      if (!landmarks || !avatar) return;
+
+      const nose = landmarks[1];
+      const leftEye = landmarks[33];
+      const rightEye = landmarks[263];
+      const forehead = landmarks[10];
+      const chin = landmarks[152];
+
+      // ตำแหน่งกึ่งกลางระหว่างดวงตา
+      const eyeCenter = {
+        x: (leftEye.x + rightEye.x) / 2,
+        y: (leftEye.y + rightEye.y) / 2
+      };
+
+      const screenPoint = getScreenPoint(eyeCenter);
+
+      target.x = screenPoint.x;
+      target.y = screenPoint.y + SETTINGS.verticalOffset;
+
+      // คำนวณระยะห่างระหว่างดวงตาเพื่อปรับขนาดโมเดล
+      const eyeDx = rightEye.x - leftEye.x;
+      const eyeDy = rightEye.y - leftEye.y;
+      const eyeDistance = Math.sqrt(eyeDx * eyeDx + eyeDy * eyeDy);
+
+      const videoAspect = video.videoWidth / video.videoHeight;
+      const screenAspect = window.innerWidth / window.innerHeight;
+
+      let adjustedEyeDistance = eyeDistance;
+
+      if (videoAspect > screenAspect) {
+        adjustedEyeDistance *= videoAspect / screenAspect;
+      } else {
+        adjustedEyeDistance *= 1;
+      }
+
+      target.scale =
+        (adjustedEyeDistance * 2 * SETTINGS.headSize) / modelWidth;
+
+      // -----------------------------------------
+      // หันซ้าย-ขวา (Yaw)
+      // ใช้ตำแหน่งจมูกเทียบกับกึ่งกลางตา
+      // -----------------------------------------
+
+      const eyeWidth = Math.max(
+        Math.sqrt(eyeDx * eyeDx + eyeDy * eyeDy),
+        0.001
+      );
+
+      const noseOffset = (nose.x - eyeCenter.x) / eyeWidth;
+
+      target.yaw = THREE.MathUtils.clamp(
+        -noseOffset * SETTINGS.yawStrength,
+        -0.8,
+        0.8
+      );
+
+      // -----------------------------------------
+      // ก้ม-เงย (Pitch)
+      // -----------------------------------------
+
+      const faceHeight = Math.max(chin.y - forehead.y, 0.001);
+      const noseRelativeY = (nose.y - forehead.y) / faceHeight;
+
+      target.pitch = THREE.MathUtils.clamp(
+        (noseRelativeY - 0.48) * SETTINGS.pitchStrength,
+        -0.6,
+        0.6
+      );
+
+      // -----------------------------------------
+      // เอียงหัว (Roll)
+      // -----------------------------------------
+
+      const eyeAngle = Math.atan2(
+        rightEye.y - leftEye.y,
+        rightEye.x - leftEye.x
+      );
+
+      target.roll = THREE.MathUtils.clamp(
+        -eyeAngle * SETTINGS.rollStrength,
+        -0.7,
+        0.7
+      );
+    }
+
+    // =========================================
+    // 7. ขยับ Shape Keys ของดวงตา
+    // =========================================
+
+    function setMorph(name, value) {
+      for (const mesh of morphTargets) {
+        const index = mesh.dictionary[name];
 
         if (index !== undefined) {
-          mesh.morphTargetInfluences[index] = value;
+          mesh.influences[index] = THREE.MathUtils.clamp(value, 0, 1);
         }
       }
     }
 
-    async function start() {
-      try {
-        startButton.disabled = true;
-        status.textContent = 'กำลังเปิดกล้อง...';
-
-        const stream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: {
-            facingMode: 'user',
-            width: { ideal: 1280 },
-            height: { ideal: 720 }
-          }
-        });
-
-        video.srcObject = stream;
-        await video.play();
-
-        status.textContent = 'กำลังโหลดโมเดล...';
-
-        const gltf = await new GLTFLoader().loadAsync(
-          './robot_head4.glb'
-        );
-
-        model = gltf.scene;
-        scene.add(model);
-
-        model.traverse(object => {
-          if (
-            object.isMesh &&
-            object.morphTargetDictionary &&
-            object.morphTargetInfluences
-          ) {
-            meshes.push(object);
-            console.log('Shape Keys:', object.morphTargetDictionary);
-          }
-        });
-
-        // หาขนาดจริงของโมเดล เพื่อคำนวณขนาดให้สัมพันธ์กับใบหน้า
-        model.updateMatrixWorld(true);
-
-        const bounds = new THREE.Box3().setFromObject(model);
-        const size = new THREE.Vector3();
-        bounds.getSize(size);
-
-        modelWidth = Math.max(size.x, 0.001);
-
-        // ตั้งจุดหมุนไว้กลางโมเดล
-        const center = new THREE.Vector3();
-        bounds.getCenter(center);
-
-        for (const child of [...model.children]) {
-          model.remove(child);
-        }
-
-        // วิธีนี้ใช้ group ครอบโมเดลเพื่อเลื่อนจุดกึ่งกลางไปที่ origin
-        // โหลดโมเดลใหม่อีกครั้งเพื่อรักษาโครงสร้างภายในไว้
-        const secondGLTF = await new GLTFLoader().loadAsync(
-          './robot_head4.glb'
-        );
-
-        scene.remove(model);
-        model = new THREE.Group();
-
-        const innerModel = secondGLTF.scene;
-        innerModel.position.sub(center);
-        model.add(innerModel);
-        scene.add(model);
-
-        meshes = [];
-        innerModel.traverse(object => {
-          if (
-            object.isMesh &&
-            object.morphTargetDictionary &&
-            object.morphTargetInfluences
-          ) {
-            meshes.push(object);
-          }
-        });
-
-        status.textContent = 'กำลังเตรียมระบบติดตามใบหน้า...';
-
-        const vision = await FilesetResolver.forVisionTasks(
-          'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-        );
-
-        landmarker = await FaceLandmarker.createFromOptions(
-          vision,
-          {
-            baseOptions: {
-              modelAssetPath:
-                'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
-              delegate: 'GPU'
-            },
-            runningMode: 'VIDEO',
-            numFaces: 1,
-            outputFaceBlendshapes: true
-          }
-        );
-
-        status.textContent = 'หันหน้าเข้ากล้อง';
-
-        startButton.style.display = 'none';
-        animate();
-
-      } catch (error) {
-        console.error(error);
-        status.textContent = 'เกิดข้อผิดพลาด: ' + error.message;
-        startButton.disabled = false;
+    function updateBlendshapes(results) {
+      if (!results.faceBlendshapes ||
+          results.faceBlendshapes.length === 0) {
+        return;
       }
+
+      const categories = results.faceBlendshapes[0].categories;
+      const scores = {};
+
+      for (const category of categories) {
+        scores[category.categoryName] = category.score;
+      }
+
+      // กระพริบตาซ้ายและขวา
+      setMorph("eyeBlinkLeft", scores.eyeBlinkLeft || 0);
+      setMorph("eyeBlinkRight", scores.eyeBlinkRight || 0);
+
+      // ถ้าโมเดลมี Shape Keys เหล่านี้ ก็จะขยับตามด้วย
+      setMorph("mouthOpen", scores.jawOpen || 0);
+      setMorph("smile", Math.max(
+        scores.mouthSmileLeft || 0,
+        scores.mouthSmileRight || 0
+      ));
+      setMorph("frown", Math.max(
+        scores.mouthFrownLeft || 0,
+        scores.mouthFrownRight || 0
+      ));
     }
 
-    function animate() {
-      requestAnimationFrame(animate);
+    // =========================================
+    // 8. ลูปตรวจจับใบหน้าตลอดเวลา
+    // =========================================
+
+    function detectFace() {
+      if (!trackingStarted) return;
 
       if (
-        landmarker &&
+        faceLandmarker &&
         video.readyState >= 2 &&
         video.currentTime !== lastVideoTime
       ) {
         lastVideoTime = video.currentTime;
 
-        const result = landmarker.detectForVideo(
-          video,
-          performance.now()
-        );
-
-        const landmarks = result.faceLandmarks?.[0];
-
-        if (landmarks) {
-          faceFound = true;
-
-          // จุดกึ่งกลางระหว่างดวงตาทั้งสอง
-          const leftEye = landmarks[33];
-          const rightEye = landmarks[263];
-
-          const centerX = (leftEye.x + rightEye.x) / 2;
-          const centerY = (leftEye.y + rightEye.y) / 2;
-
-          // ระยะห่างระหว่างตาใช้คำนวณขนาดโมเดล
-          const dx = leftEye.x - rightEye.x;
-          const dy = leftEye.y - rightEye.y;
-          const eyeDistance = Math.sqrt(dx * dx + dy * dy);
-
-          const aspect = window.innerWidth / window.innerHeight;
-
-          // กล้องถูกกลับซ้าย-ขวา จึงกลับค่า X ให้ตรงกัน
-          const targetX = (centerX - 0.5) * 2 * aspect;
-          const targetY = (0.5 - centerY) * 2;
-
-          // ค่า 2.5 คือขนาดเริ่มต้น ปรับเพิ่มหรือลดได้
-          const targetScale =
-            Math.max(0.01, eyeDistance * 2 * 2.5);
-
-          // ทำให้การเคลื่อนที่นุ่มนวล
-          smoothedX += (targetX - smoothedX) * 0.35;
-          smoothedY += (targetY - smoothedY) * 0.35;
-          smoothedScale += (targetScale - smoothedScale) * 0.25;
-
-          model.position.set(smoothedX, smoothedY, 0);
-          model.scale.setScalar(
-            smoothedScale / modelWidth
+        try {
+          const results = faceLandmarker.detectForVideo(
+            video,
+            performance.now()
           );
 
-          const categories =
-            result.faceBlendshapes?.[0]?.categories ?? [];
+          if (
+            results.faceLandmarks &&
+            results.faceLandmarks.length > 0
+          ) {
+            updateHead(results.faceLandmarks[0]);
+            updateBlendshapes(results);
 
-          const values = {};
-
-          for (const item of categories) {
-            values[item.categoryName] = item.score;
+            statusText.textContent = "ตรวจพบใบหน้าแล้ว ✓";
+          } else {
+            statusText.textContent = "ไม่พบใบหน้า ลองหันเข้ากล้อง";
           }
-
-          setShape(
-            'eyeBlinkLeft',
-            Math.min(1, (values.eyeBlinkLeft ?? 0) * 1.5)
-          );
-
-          setShape(
-            'eyeBlinkRight',
-            Math.min(1, (values.eyeBlinkRight ?? 0) * 1.5)
-          );
-
-          setShape('mouthOpen', values.jawOpen ?? 0);
-
-          setShape(
-            'smile',
-            Math.max(
-              values.mouthSmileLeft ?? 0,
-              values.mouthSmileRight ?? 0
-            )
-          );
-
-          setShape(
-            'frown',
-            Math.max(
-              values.browDownLeft ?? 0,
-              values.browDownRight ?? 0
-            )
-          );
-
-          status.textContent = 'กำลังติดตามใบหน้า';
-        } else {
-          faceFound = false;
-          status.textContent = 'ไม่พบใบหน้า';
+        } catch (error) {
+          console.error("Face tracking error:", error);
         }
       }
 
-      // ซ่อนโมเดลเมื่อไม่พบใบหน้า
-      if (model) {
-        model.visible = faceFound;
-      }
-
-      renderer.render(scene, camera3D);
+      requestAnimationFrame(detectFace);
     }
 
-    startButton.addEventListener('click', start);
+    // =========================================
+    // 9. ทำให้โมเดลขยับอย่างนุ่มนวล
+    // =========================================
 
-    window.addEventListener('resize', () => {
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (avatar) {
+        const smooth = SETTINGS.smoothness;
+
+        tracking.x += (target.x - tracking.x) * smooth;
+        tracking.y += (target.y - tracking.y) * smooth;
+        tracking.scale += (target.scale - tracking.scale) * smooth;
+
+        tracking.yaw += (target.yaw - tracking.yaw) * smooth;
+        tracking.pitch += (target.pitch - tracking.pitch) * smooth;
+        tracking.roll += (target.roll - tracking.roll) * smooth;
+
+        // ตำแหน่งและขนาด
+        avatar.position.x = tracking.x;
+        avatar.position.y = tracking.y;
+
+        const finalScale = Math.max(tracking.scale, 0.001);
+        avatar.scale.setScalar(finalScale);
+
+        // หมุนโมเดลตามหัวจริง
+        avatar.rotation.order = "YXZ";
+        avatar.rotation.y = tracking.yaw;
+        avatar.rotation.x = tracking.pitch;
+        avatar.rotation.z = tracking.roll;
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // =========================================
+    // 10. ปรับขนาดตามหน้าจอ
+    // =========================================
+
+    function resize() {
       const aspect = window.innerWidth / window.innerHeight;
 
-      camera3D.left = -aspect;
-      camera3D.right = aspect;
-      camera3D.top = 1;
-      camera3D.bottom = -1;
-      camera3D.updateProjectionMatrix();
+      camera.left = -aspect;
+      camera.right = aspect;
+      camera.top = 1;
+      camera.bottom = -1;
+      camera.updateProjectionMatrix();
 
       renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    window.addEventListener("resize", resize);
+    resize();
+
+    // =========================================
+    // 11. เริ่มต้นทั้งหมด
+    // =========================================
+
+    startButton.addEventListener("click", async () => {
+      startButton.disabled = true;
+
+      try {
+        await startCamera();
+        await loadAvatar();
+        await setupFaceTracking();
+
+        trackingStarted = true;
+        startButton.style.display = "none";
+
+        statusText.textContent = "กำลังติดตามใบหน้า...";
+        detectFace();
+      } catch (error) {
+        console.error(error);
+
+        statusText.textContent =
+          "เริ่มระบบไม่สำเร็จ: " + error.message;
+
+        startButton.disabled = false;
+      }
     });
+
+    animate();
   </script>
 </body>
 </html>
-```
