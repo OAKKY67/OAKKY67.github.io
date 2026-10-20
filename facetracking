@@ -3,21 +3,29 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport"
-        content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
 
+  <title>Face Tracking - OAKKY67</title>
+
+  <!-- A-Frame -->
   <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+
+  <!-- MindAR Face Tracking -->
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
 
   <style>
     html, body {
       margin: 0;
+      padding: 0;
       width: 100%;
       height: 100%;
       overflow: hidden;
+      background: #000;
     }
 
     a-scene {
+      position: fixed;
+      inset: 0;
       width: 100%;
       height: 100%;
     }
@@ -25,17 +33,21 @@
 </head>
 
 <body>
+
   <a-scene
     mindar-face="faceOccluder: false"
     embedded
     vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: false">
+    device-orientation-permission-ui="enabled: false"
+    renderer="colorManagement: true">
 
+    <!-- Face Mesh สำหรับติดตามใบหน้า -->
     <a-entity
       id="face"
       mindar-face-default-face-occluder>
     </a-entity>
 
+    <!-- Camera -->
     <a-camera
       active="false"
       position="0 0 0">
@@ -45,29 +57,37 @@
 
   <script>
     const scene = document.querySelector("a-scene");
+    let textureLoader;
 
     scene.addEventListener("arReady", () => {
       const THREE = AFRAME.THREE;
 
-      // เปลี่ยน URL ให้ตรงกับ GitHub Pages ของนาย
-      const imageURL =
-        "https://myname.github.io/facetracking/face.png";
+      console.log("MindAR Face Tracking Ready");
 
-      const loader = new THREE.TextureLoader();
+      // URL รูปของนายบน GitHub Pages
+      const imageURL = "https://oakky67.github.io/face.png";
 
-      loader.load(
+      textureLoader = new THREE.TextureLoader();
+
+      textureLoader.load(
         imageURL,
 
         (texture) => {
           texture.colorSpace = THREE.SRGBColorSpace;
 
+          // ค้นหา Face Mesh
           const face = document.querySelector("#face");
           const mesh = face.getObject3D("mesh");
 
           if (!mesh) {
-            console.error("ไม่พบ Face Mesh");
+            console.error(
+              "ไม่พบ Face Mesh กรุณาตรวจสอบ MindAR"
+            );
             return;
           }
+
+          // เปลี่ยนวัสดุเป็นรูปของเรา
+          const oldMaterial = mesh.material;
 
           mesh.material = new THREE.MeshBasicMaterial({
             map: texture,
@@ -77,17 +97,38 @@
             depthWrite: false
           });
 
-          mesh.material.needsUpdate = true;
+          // ล้างวัสดุเดิม
+          if (oldMaterial) {
+            if (Array.isArray(oldMaterial)) {
+              oldMaterial.forEach((material) => {
+                material.dispose();
+              });
+            } else {
+              oldMaterial.dispose();
+            }
+          }
+
+          // ให้ Face Mesh แสดงผลตลอด
           mesh.frustumCulled = false;
+
+          console.log("โหลด face.png สำเร็จ");
         },
 
         undefined,
 
         (error) => {
-          console.error("โหลดรูปไม่สำเร็จ", error);
+          console.error(
+            "โหลด face.png ไม่สำเร็จ ตรวจสอบ URL รูปภาพ",
+            error
+          );
         }
       );
     });
+
+    scene.addEventListener("arError", (event) => {
+      console.error("MindAR Error:", event);
+    });
   </script>
+
 </body>
 </html>
