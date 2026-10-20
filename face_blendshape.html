@@ -10,8 +10,7 @@
   {
     "imports": {
       "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/",
-      "mindar-face-three": "https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-three.prod.js"
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
     }
   }
   </script>
@@ -19,115 +18,223 @@
   <style>
     body {
       margin: 0;
+      overflow: hidden;
+      background: #111;
       font-family: sans-serif;
     }
 
     #container {
       width: 100vw;
       height: 100vh;
-      overflow: hidden;
     }
 
-    #controls {
+    #status {
       position: fixed;
-      z-index: 10;
-      top: 10px;
-      left: 10px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
+      top: 12px;
+      left: 12px;
+      z-index: 5;
+      padding: 10px;
+      color: white;
+      background: #222c;
+      border-radius: 8px;
+      font-size: 14px;
     }
 
-    button {
-      padding: 10px;
-      cursor: pointer;
+    #camera {
+      position: fixed;
+      right: 10px;
+      bottom: 10px;
+      width: 150px;
+      transform: scaleX(-1);
+      border-radius: 8px;
+      z-index: 5;
     }
   </style>
 </head>
 
 <body>
   <div id="container"></div>
-
-  <div id="controls">
-    <button id="blink">ทดสอบกระพริบตา</button>
-    <button id="reset">คืนค่าดวงตา</button>
-  </div>
+  <div id="status">กำลังโหลดระบบตรวจจับใบหน้า...</div>
+  <video id="camera" autoplay playsinline muted></video>
 
   <script type="module">
     import * as THREE from 'three';
     import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-    import { MindARThree } from 'mindar-face-three';
 
-    const mindar = new MindARThree({
-      container: document.querySelector('#container')
+    import {
+      FaceLandmarker,
+      FilesetResolver
+    } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/+esm';
+
+    const status = document.querySelector('#status');
+    const video = document.querySelector('#camera');
+
+    let faceLandmarker;
+    let meshes = [];
+    let lastVideoTime = -1;
+
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color(0x222222);
+
+    const camera3D = new THREE.PerspectiveCamera(
+      35,
+      window.innerWidth / window.innerHeight,
+      0.1,
+      100
+    );
+
+    camera3D.position.set(0, 0, 5);
+
+    const renderer = new THREE.WebGLRenderer({
+      antialias: true
     });
 
-    const { renderer, scene, camera } = mindar;
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    scene.add(
-      new THREE.HemisphereLight(0xffffff, 0xbbbbff, 2)
-    );
+    document.querySelector('#container').appendChild(renderer.domElement);
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x777788, 2));
 
     const light = new THREE.DirectionalLight(0xffffff, 2);
-    light.position.set(0, 1, 2);
+    light.position.set(1, 2, 4);
     scene.add(light);
 
-    const gltf = await new GLTFLoader().loadAsync(
-      './robot_head4.glb'
-    );
-
-    const model = gltf.scene;
-    model.scale.setScalar(2);
-
-    const anchor = mindar.addAnchor(1);
-    anchor.group.add(model);
-
-    const meshes = [];
-
-    model.traverse(object => {
-      if (
-        object.isMesh &&
-        object.morphTargetDictionary &&
-        object.morphTargetInfluences
-      ) {
-        meshes.push(object);
-
-        console.log(
-          'Mesh:', object.name,
-          'Shape Keys:', object.morphTargetDictionary
-        );
-      }
-    });
-
     function setShape(name, value) {
-      let found = false;
-
       for (const mesh of meshes) {
-        const index = mesh.morphTargetDictionary[name];
+        const index = mesh.morphTargetDictionary?.[name];
 
         if (index !== undefined) {
           mesh.morphTargetInfluences[index] = value;
-          found = true;
         }
       }
-
-      console.log(name, found ? value : 'ไม่พบ Shape Key');
     }
 
-    document.querySelector('#blink').onclick = () => {
-      setShape('eyeBlinkLeft', 1);
-      setShape('eyeBlinkRight', 1);
-    };
+    async function main() {
+      status.textContent = 'กำลังโหลดโมเดล...';
 
-    document.querySelector('#reset').onclick = () => {
-      setShape('eyeBlinkLeft', 0);
-      setShape('eyeBlinkRight', 0);
-    };
+      const gltf = await new GLTFLoader().loadAsync(
+        './robot_head4.glb'
+      );
 
-    await mindar.start();
+      const model = gltf.scene;
+      model.scale.setScalar(2);
+      scene.add(model);
 
-    renderer.setAnimationLoop(() => {
-      renderer.render(scene, camera);
+      model.traverse(object => {
+        if (
+          object.isMesh &&
+          object.morphTargetDictionary &&
+          object.morphTargetInfluences
+        ) {
+          meshes.push(object);
+          console.log('Shape Keys:', object.morphTargetDictionary);
+        }
+      });
+
+      if (meshes.length === 0) {
+        status.textContent =
+          'ไม่พบ Shape Keys ในโมเดล กรุณาตรวจไฟล์ GLB';
+      }
+
+      status.textContent = 'กำลังเตรียม Face Landmarker...';
+
+      const vision = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+      );
+
+      faceLandmarker = await FaceLandmarker.createFromOptions(
+        vision,
+        {
+          baseOptions: {
+            modelAssetPath:
+              'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+            delegate: 'GPU'
+          },
+          runningMode: 'VIDEO',
+          numFaces: 1,
+          outputFaceBlendshapes: true
+        }
+      );
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          facingMode: 'user',
+          width: { ideal: 640 },
+          height: { ideal: 480 }
+        },
+        audio: false
+      });
+
+      video.srcObject = stream;
+      await video.play();
+
+      status.textContent =
+        'ตรวจจับใบหน้าแล้ว ลองกะพริบตา';
+
+      animate();
+    }
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      if (
+        faceLandmarker &&
+        video.readyState >= 2 &&
+        video.currentTime !== lastVideoTime
+      ) {
+        lastVideoTime = video.currentTime;
+
+        const result = faceLandmarker.detectForVideo(
+          video,
+          performance.now()
+        );
+
+        const categories =
+          result.faceBlendshapes?.[0]?.categories ?? [];
+
+        const values = {};
+
+        for (const item of categories) {
+          values[item.categoryName] = item.score;
+        }
+
+        // ปรับค่าเพื่อให้ตากะพริบตามจริง
+        setShape(
+          'eyeBlinkLeft',
+          Math.min(1, (values.eyeBlinkLeft ?? 0) * 1.5)
+        );
+
+        setShape(
+          'eyeBlinkRight',
+          Math.min(1, (values.eyeBlinkRight ?? 0) * 1.5)
+        );
+
+        // Shape Keys เหล่านี้จะทำงานเมื่อมีอยู่ในโมเดล
+        setShape('mouthOpen', values.jawOpen ?? 0);
+        setShape('smile', Math.max(
+          values.mouthSmileLeft ?? 0,
+          values.mouthSmileRight ?? 0
+        ));
+        setShape('frown', Math.max(
+          values.browDownLeft ?? 0,
+          values.browDownRight ?? 0
+        ));
+      }
+
+      renderer.render(scene, camera3D);
+    }
+
+    window.addEventListener('resize', () => {
+      camera3D.aspect = window.innerWidth / window.innerHeight;
+      camera3D.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    main().catch(error => {
+      console.error(error);
+      status.textContent = 'เกิดข้อผิดพลาด: ' + error.message;
     });
   </script>
 </body>
