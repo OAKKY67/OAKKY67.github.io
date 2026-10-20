@@ -4,130 +4,142 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AR Infographic</title>
 
-  <title>Face Tracking - OAKKY67</title>
-
-  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-face-aframe.prod.js"></script>
+  <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
   <style>
-    html, body {
+    body {
       margin: 0;
-      padding: 0;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-      background: transparent;
+      font-family: sans-serif;
     }
 
-    a-scene {
+    #start {
       position: fixed;
-      inset: 0;
-      width: 100%;
-      height: 100%;
-      background: transparent;
+      z-index: 10;
+      top: 45%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 16px 28px;
+      background: orange;
+      border: none;
+      border-radius: 12px;
+      font-size: 18px;
+      font-weight: bold;
     }
 
-    .a-canvas {
-      background: transparent !important;
+    #status {
+      position: fixed;
+      z-index: 9;
+      top: 10px;
+      left: 10px;
+      right: 10px;
+      text-align: center;
+      color: white;
+      background: #10243dcc;
+      padding: 12px;
+      border-radius: 8px;
     }
   </style>
 </head>
 
 <body>
-  <a-scene
-    mindar-face="faceOccluder: false"
-    embedded
-    vr-mode-ui="enabled: false"
-    device-orientation-permission-ui="enabled: false"
-    renderer="alpha: true; colorManagement: true">
+  <div id="status">กดเริ่ม แล้วสแกนรูป Target</div>
+  <button id="start">เริ่มสแกน AR</button>
 
-    <a-entity
-      id="face"
-      mindar-face-default-face-occluder>
-    </a-entity>
+  <a-scene
+    mindar-image="
+      imageTargetSrc: ./assets/targets.mind;
+      autoStart: false;
+      uiLoading: yes;
+      uiScanning: yes;
+    "
+    color-space="sRGB"
+    renderer="colorManagement: true"
+    vr-mode-ui="enabled: false"
+    device-orientation-permission-ui="enabled: false">
+
+    <a-assets>
+      <img
+        id="info"
+        src="./assets/infographic.png">
+    </a-assets>
 
     <a-camera
-      active="false"
-      position="0 0 0">
+      position="0 0 0"
+      look-controls="enabled: false">
     </a-camera>
+
+    <!-- Target ลำดับที่ 0 -->
+    <a-entity id="target"
+      mindar-image-target="targetIndex: 0">
+
+      <!-- แสดง Infographic เมื่อพบ Target -->
+      <a-plane
+        src="#info"
+        position="0 0 0"
+        width="1"
+        height="0.5625">
+      </a-plane>
+
+    </a-entity>
   </a-scene>
+
+  <!-- เสียงพากย์ของคุณ -->
+  <audio id="voice"
+    src="./assets/voice.mp3"
+    preload="auto">
+  </audio>
 
   <script>
     const scene = document.querySelector("a-scene");
+    const target = document.querySelector("#target");
+    const voice = document.querySelector("#voice");
+    const start = document.querySelector("#start");
+    const status = document.querySelector("#status");
 
-    scene.addEventListener("arReady", () => {
-      const THREE = AFRAME.THREE;
-      const image = new Image();
+    let visible = false;
 
-      image.crossOrigin = "anonymous";
-      image.src = "https://oakky67.github.io/face.png";
+    // เริ่มเปิดกล้องหลังและระบบสแกน
+    start.addEventListener("click", async () => {
+      try {
+        status.textContent = "กำลังเปิดกล้อง...";
+        await scene.systems["mindar-image-system"].start();
 
-      image.onload = () => {
-        const canvas = document.createElement("canvas");
-        canvas.width = image.naturalWidth;
-        canvas.height = image.naturalHeight;
+        start.style.display = "none";
+        status.textContent = "กำลังสแกนรูป Target";
 
-        const ctx = canvas.getContext("2d", {
-          willReadFrequently: true
-        });
+      } catch (error) {
+        console.error(error);
+        status.textContent =
+          "เปิดกล้องไม่ได้ กรุณาอนุญาตใช้กล้องและใช้ HTTPS";
+      }
+    });
 
-        ctx.drawImage(image, 0, 0);
+    // เมื่อสแกนพบ Target
+    target.addEventListener("targetFound", async () => {
+      visible = true;
+      status.textContent = "พบ Target แล้ว! กำลังเล่นเสียงพากย์";
 
-        const pixels = ctx.getImageData(
-          0, 0, canvas.width, canvas.height
-        );
+      voice.currentTime = 0;
 
-        // ทำพื้นหลังดำให้โปร่งใส
-        for (let i = 0; i < pixels.data.length; i += 4) {
-          const r = pixels.data[i];
-          const g = pixels.data[i + 1];
-          const b = pixels.data[i + 2];
+      try {
+        await voice.play();
+      } catch (error) {
+        status.textContent =
+          "พบ Target แล้ว แต่เสียงถูกบล็อก กรุณาแตะหน้าจอแล้วลองใหม่";
+        console.error(error);
+      }
+    });
 
-          if (Math.max(r, g, b) < 40) {
-            pixels.data[i + 3] = 0;
-          }
-        }
+    // เมื่อกล้องตรวจไม่พบ Target
+    target.addEventListener("targetLost", () => {
+      visible = false;
+      status.textContent = "ไม่พบ Target กรุณาสแกนใหม่";
 
-        ctx.putImageData(pixels, 0, 0);
-
-        const texture = new THREE.CanvasTexture(canvas);
-        texture.colorSpace = THREE.SRGBColorSpace;
-        texture.needsUpdate = true;
-
-        const face = document.querySelector("#face");
-        const mesh = face.getObject3D("mesh");
-
-        if (!mesh) {
-          console.error("ไม่พบ Face Mesh");
-          return;
-        }
-
-        const oldMaterial = mesh.material;
-
-        mesh.material = new THREE.MeshBasicMaterial({
-          map: texture,
-          transparent: true,
-          opacity: 1,
-          side: THREE.DoubleSide,
-          depthWrite: false
-        });
-
-        if (oldMaterial) {
-          if (Array.isArray(oldMaterial)) {
-            oldMaterial.forEach(m => m.dispose());
-          } else {
-            oldMaterial.dispose();
-          }
-        }
-
-        mesh.frustumCulled = false;
-        console.log("Face Texture loaded");
-      };
-
-      image.onerror = () => {
-        console.error("โหลด face.png ไม่สำเร็จ");
-      };
+      voice.pause();
+      voice.currentTime = 0;
     });
   </script>
 </body>
