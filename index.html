@@ -3,7 +3,7 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <title>AR Infographic</title>
 
   <script src="https://aframe.io/releases/1.5.0/aframe.min.js"></script>
@@ -11,7 +11,12 @@
 
   <style>
     * { box-sizing: border-box; }
-    body { margin: 0; font-family: sans-serif; background: #111; }
+
+    body {
+      margin: 0;
+      font-family: sans-serif;
+      background: #111;
+    }
 
     #status {
       position: fixed;
@@ -27,19 +32,29 @@
       line-height: 1.5;
     }
 
-    #start {
+    #start, #soundButton {
       position: fixed;
       z-index: 20;
-      top: 50%;
       left: 50%;
-      transform: translate(-50%, -50%);
-      padding: 16px 24px;
+      transform: translateX(-50%);
+      padding: 15px 24px;
       border: 0;
       border-radius: 12px;
+      font-size: 17px;
+      font-weight: bold;
+    }
+
+    #start {
+      top: 50%;
       background: orange;
       color: #111;
-      font-size: 18px;
-      font-weight: bold;
+    }
+
+    #soundButton {
+      bottom: 35px;
+      display: none;
+      background: #ffb52e;
+      color: #111;
     }
 
     a-scene {
@@ -50,8 +65,9 @@
 </head>
 
 <body>
-  <div id="status">กำลังตรวจสอบไฟล์...</div>
+  <div id="status">กำลังตรวจสอบไฟล์ AR...</div>
   <button id="start" disabled>กำลังโหลด...</button>
+  <button id="soundButton">▶ เปิดเสียงบรรยาย</button>
 
   <a-scene
     id="scene"
@@ -80,12 +96,18 @@
     </a-entity>
   </a-scene>
 
-  <audio id="voice" src="./voice.mp3" preload="auto"></audio>
+  <audio
+    id="voice"
+    src="./voice.mp3"
+    preload="auto"
+    playsinline>
+  </audio>
 
   <script>
     const scene = document.querySelector("#scene");
     const statusBox = document.querySelector("#status");
     const startButton = document.querySelector("#start");
+    const soundButton = document.querySelector("#soundButton");
     const info = document.querySelector("#info");
     const voice = document.querySelector("#voice");
     const target = document.querySelector("#target");
@@ -93,23 +115,23 @@
     let started = false;
     let targetFound = false;
 
-    function errorMessage(message) {
+    function showError(message) {
       statusBox.textContent = message;
       startButton.disabled = false;
       startButton.textContent = "โหลดใหม่";
       startButton.onclick = () => location.reload();
     }
 
-    async function checkFile(url, label) {
+    async function checkFile(url, name) {
       const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) {
-        throw new Error("ไม่พบไฟล์ " + label + " (HTTP " + response.status + ")");
+        throw new Error("ไม่พบไฟล์ " + name + " (HTTP " + response.status + ")");
       }
     }
 
     async function initialize() {
       try {
-        statusBox.textContent = "กำลังตรวจสอบไฟล์ Target และรูปภาพ...";
+        statusBox.textContent = "กำลังตรวจสอบไฟล์...";
 
         await Promise.all([
           checkFile("./targets.mind", "targets.mind"),
@@ -117,25 +139,23 @@
           checkFile("./voice.mp3", "voice.mp3")
         ]);
 
-        await new Promise((resolve, reject) => {
-          if (info.complete && info.naturalWidth > 0) {
-            resolve();
-          } else {
+        if (!info.complete || info.naturalWidth === 0) {
+          await new Promise((resolve, reject) => {
             info.onload = resolve;
             info.onerror = () => reject(
-              new Error("เปิด infographic.png ไม่ได้")
+              new Error("โหลด infographic.png ไม่สำเร็จ")
             );
-          }
-        });
+          });
+        }
 
-        statusBox.textContent = "ไฟล์ครบแล้ว กดเริ่มสแกน AR";
+        statusBox.textContent = "ไฟล์พร้อมแล้ว กดเริ่มสแกน AR";
         startButton.disabled = false;
         startButton.textContent = "เริ่มสแกน AR";
         startButton.onclick = startAR;
 
       } catch (error) {
         console.error(error);
-        errorMessage("โหลดไฟล์ไม่สำเร็จ: " + error.message);
+        showError("โหลดไฟล์ไม่สำเร็จ: " + error.message);
       }
     }
 
@@ -143,56 +163,82 @@
       if (started) return;
 
       startButton.disabled = true;
-      statusBox.textContent = "กำลังเปิดกล้องและโหลดระบบ AR...";
+      statusBox.textContent = "กำลังเปิดกล้องและเริ่ม AR...";
 
       try {
         const system = scene.systems["mindar-image-system"];
-        if (!system) throw new Error("โหลด MindAR ไม่สำเร็จ");
+        if (!system) throw new Error("โหลดระบบ MindAR ไม่สำเร็จ");
 
         await system.start();
         started = true;
         startButton.style.display = "none";
         statusBox.textContent = "กำลังสแกนรูป Target";
 
-        setTimeout(() => {
-          if (started && !targetFound) {
-            statusBox.textContent =
-              "ยังไม่พบ Target: ส่องรูปต้นฉบับให้ชัดและเต็มกรอบ";
-          }
-        }, 15000);
-
       } catch (error) {
         console.error(error);
         started = false;
-        errorMessage(
-          "เปิดกล้องหรือระบบ AR ไม่สำเร็จ กรุณาอนุญาตกล้องและลองใหม่"
-        );
+        showError("เปิด AR ไม่สำเร็จ กรุณาอนุญาตกล้องแล้วลองใหม่");
       }
     }
 
-    target.addEventListener("targetFound", async () => {
-      targetFound = true;
-      statusBox.textContent = "พบ Target แล้ว! กำลังเล่นเสียงบรรยาย";
-
+    async function playVoice() {
       try {
-        voice.currentTime = 0;
+        voice.muted = false;
+        voice.volume = 1;
         await voice.play();
+
+        soundButton.textContent = "▶ เล่นเสียงบรรยายอีกครั้ง";
+        statusBox.textContent = "พบ Target แล้ว กำลังเล่นเสียงบรรยาย";
       } catch (error) {
-        console.error(error);
-        statusBox.textContent = "พบ Target แล้ว แต่เล่นเสียงไม่ได้";
+        console.error("Audio error:", error);
+
+        soundButton.style.display = "block";
+        statusBox.textContent =
+          "พบ Target แล้ว แต่เสียงไม่เริ่มอัตโนมัติ กดปุ่มเปิดเสียงด้านล่าง";
       }
+    }
+
+    soundButton.addEventListener("click", async () => {
+      if (!targetFound) {
+        statusBox.textContent = "กรุณาส่องรูป Target ให้ระบบตรวจจับก่อน";
+        return;
+      }
+
+      voice.currentTime = 0;
+      await playVoice();
+    });
+
+    target.addEventListener("targetFound", () => {
+      targetFound = true;
+      soundButton.style.display = "block";
+      voice.currentTime = 0;
+      playVoice();
     });
 
     target.addEventListener("targetLost", () => {
       targetFound = false;
-      statusBox.textContent = "ไม่พบ Target กรุณาส่องรูปอีกครั้ง";
       voice.pause();
       voice.currentTime = 0;
+      soundButton.style.display = "none";
+      statusBox.textContent = "ไม่พบ Target กรุณาส่องรูปอีกครั้ง";
+    });
+
+    voice.addEventListener("ended", () => {
+      if (targetFound) {
+        soundButton.textContent = "▶ เล่นเสียงบรรยายอีกครั้ง";
+      }
+    });
+
+    voice.addEventListener("error", () => {
+      console.error("โหลดเสียงไม่สำเร็จ", voice.error);
+      statusBox.textContent =
+        "พบ Target แล้ว แต่โหลดเสียงไม่ได้ ตรวจสอบไฟล์ voice.mp3";
+      soundButton.style.display = "block";
     });
 
     scene.addEventListener("arError", event => {
       console.error("MindAR error:", event);
-      errorMessage("ระบบ AR เกิดข้อผิดพลาด กรุณารีเฟรชหน้าเว็บ");
+      showError("ระบบ AR เกิดข้อผิดพลาด กรุณารีเฟรชหน้าเว็บ");
     });
 
     initialize();
